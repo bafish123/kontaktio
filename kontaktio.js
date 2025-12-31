@@ -3,15 +3,12 @@
   window.KontaktioLoaded = true;
 
   const script = document.currentScript;
-
   const CLIENT_ID = script.getAttribute("data-client") || "demo";
-  const BRAND = script.getAttribute("data-brand") || "Kontaktio";
-  const COLOR = script.getAttribute("data-color") || "#111";
-
   const BACKEND_URL = "https://chatbot-backend-x2cy.onrender.com/chat";
 
   let sessionId = null;
-  let open = false;
+  let themeApplied = false;
+  let widget, launcher, messages;
 
   const style = document.createElement("style");
   style.textContent = `
@@ -22,9 +19,8 @@
     width: 56px;
     height: 56px;
     border-radius: 50%;
-    background: ${COLOR};
+    background: #111;
     color: #fff;
-    font-size: 24px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -48,17 +44,15 @@
   }
 
   #k-header {
-    background: ${COLOR};
-    color: #fff;
     padding: 12px;
     font-weight: bold;
+    color: #fff;
   }
 
   #k-messages {
     flex: 1;
     padding: 12px;
     overflow-y: auto;
-    background: #f6f6f6;
   }
 
   .k-msg {
@@ -69,16 +63,8 @@
     font-size: 14px;
   }
 
-  .k-user {
-    background: ${COLOR};
-    color: #fff;
-    margin-left: auto;
-  }
-
-  .k-bot {
-    background: #e5e5e5;
-    color: #000;
-  }
+  .k-user { margin-left: auto; color: #fff; }
+  .k-bot { background: #e5e5e5; }
 
   #k-input {
     display: flex;
@@ -89,27 +75,25 @@
     flex: 1;
     padding: 12px;
     border: none;
-    outline: none;
   }
 
   #k-input button {
-    background: ${COLOR};
-    color: #fff;
     border: none;
     padding: 0 16px;
     cursor: pointer;
+    color: #fff;
   }
   `;
   document.head.appendChild(style);
 
-  const launcher = document.createElement("div");
+  launcher = document.createElement("div");
   launcher.id = "k-launcher";
   launcher.textContent = "💬";
 
-  const widget = document.createElement("div");
+  widget = document.createElement("div");
   widget.id = "k-widget";
   widget.innerHTML = `
-    <div id="k-header">${BRAND}</div>
+    <div id="k-header">Asystent</div>
     <div id="k-messages">
       <div class="k-msg k-bot">Dzień dobry 👋 W czym mogę pomóc?</div>
     </div>
@@ -122,51 +106,58 @@
   document.body.appendChild(launcher);
   document.body.appendChild(widget);
 
-  const messages = widget.querySelector("#k-messages");
+  messages = widget.querySelector("#k-messages");
   const input = widget.querySelector("input");
   const button = widget.querySelector("button");
 
+  function applyTheme(theme) {
+    if (!theme) return;
+
+    launcher.style.background = theme.primary;
+    widget.style.borderRadius = theme.radius + "px";
+    widget.querySelector("#k-header").style.background = theme.primary;
+    widget.querySelector("#k-input button").style.background = theme.primary;
+    messages.style.background = theme.background;
+
+    if (theme.position === "left") {
+      launcher.style.left = "20px";
+      widget.style.left = "20px";
+      launcher.style.right = widget.style.right = "auto";
+    }
+  }
+
   function add(text, cls) {
-    const div = document.createElement("div");
-    div.className = "k-msg " + cls;
-    div.textContent = text;
-    messages.appendChild(div);
+    const d = document.createElement("div");
+    d.className = "k-msg " + cls;
+    d.textContent = text;
+    messages.appendChild(d);
     messages.scrollTop = messages.scrollHeight;
   }
 
   async function send() {
     const text = input.value.trim();
     if (!text) return;
-
     add(text, "k-user");
     input.value = "";
 
-    try {
-      const res = await fetch(BACKEND_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: text,
-          sessionId,
-          clientId: CLIENT_ID
-        })
-      });
+    const res = await fetch(BACKEND_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: text, sessionId, clientId: CLIENT_ID })
+    });
 
-      const data = await res.json();
-      sessionId = data.sessionId;
-      add(data.reply, "k-bot");
-    } catch {
-      add("Błąd połączenia z serwerem.", "k-bot");
+    const data = await res.json();
+    sessionId = data.sessionId;
+    if (!themeApplied && data.theme) {
+      applyTheme(data.theme);
+      themeApplied = true;
     }
+    add(data.reply, "k-bot");
   }
 
-  launcher.onclick = () => {
-    open = !open;
-    widget.style.display = open ? "flex" : "none";
-  };
+  launcher.onclick = () =>
+    (widget.style.display = widget.style.display === "flex" ? "none" : "flex");
 
   button.onclick = send;
-  input.addEventListener("keydown", e => {
-    if (e.key === "Enter") send();
-  });
+  input.addEventListener("keydown", e => e.key === "Enter" && send());
 })();
