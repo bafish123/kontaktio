@@ -2,8 +2,6 @@
   if (window.KontaktioLoaded) return;
   window.KontaktioLoaded = true;
 
-  console.log("Kontaktio PRO widget loaded");
-
   const script = document.currentScript;
   const CLIENT_ID = script.getAttribute("data-client") || "demo";
   const BACKEND_URL = "https://chatbot-backend-x2cy.onrender.com/chat";
@@ -20,21 +18,24 @@
   :root {
     --k-header-bg: #111;
     --k-header-text: #fff;
-
     --k-user-bg: #111;
     --k-user-text: #fff;
-
     --k-bot-bg: #e5e7eb;
     --k-bot-text: #111;
-
     --k-widget-bg: #f8fafc;
     --k-input-bg: #fff;
     --k-input-text: #111;
-
     --k-button-bg: #111;
     --k-button-text: #fff;
-
     --k-radius: 14px;
+  }
+
+  body.k-dark {
+    --k-widget-bg: #0f172a;
+    --k-input-bg: #020617;
+    --k-input-text: #e5e7eb;
+    --k-bot-bg: #1e293b;
+    --k-bot-text: #e5e7eb;
   }
 
   #k-launcher {
@@ -51,7 +52,6 @@
     justify-content: center;
     cursor: pointer;
     z-index: 99999;
-    box-shadow: 0 10px 30px rgba(0,0,0,.35);
   }
 
   #k-widget {
@@ -66,39 +66,20 @@
     flex-direction: column;
     overflow: hidden;
     box-shadow: 0 25px 60px rgba(0,0,0,.45);
-    animation: kEnter .25s ease-out;
-    font-family: -apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;
-  }
-
-  @keyframes kEnter {
-    from { transform: translateY(20px) scale(.98); opacity: 0; }
-    to { transform: translateY(0) scale(1); opacity: 1; }
   }
 
   #k-header {
     background: var(--k-header-bg);
     color: var(--k-header-text);
-    padding: 12px 14px;
-    font-weight: 600;
+    padding: 12px;
     display: flex;
     justify-content: space-between;
-    align-items: center;
-  }
-
-  #k-header button {
-    background: none;
-    border: none;
-    color: inherit;
-    cursor: pointer;
-    font-size: 14px;
-    opacity: .8;
   }
 
   #k-messages {
     flex: 1;
     padding: 12px;
     overflow-y: auto;
-    background: transparent;
   }
 
   .k-msg {
@@ -107,14 +88,6 @@
     border-radius: 14px;
     margin-bottom: 10px;
     font-size: 14px;
-    line-height: 1.4;
-    animation: msgIn .2s ease-out;
-    opacity: 1 !important;
-  }
-
-  @keyframes msgIn {
-    from { transform: translateY(6px); opacity: 0; }
-    to { transform: translateY(0); opacity: 1; }
   }
 
   .k-user {
@@ -126,17 +99,11 @@
   .k-bot {
     background: var(--k-bot-bg);
     color: var(--k-bot-text);
-    margin-right: auto;
-  }
-
-  .k-typing {
-    opacity: .6;
-    font-style: italic;
   }
 
   #k-input {
     display: flex;
-    border-top: 1px solid rgba(0,0,0,.08);
+    border-top: 1px solid rgba(0,0,0,.1);
   }
 
   #k-input input {
@@ -146,12 +113,11 @@
     outline: none;
     background: var(--k-input-bg);
     color: var(--k-input-text);
-    font-size: 14px;
   }
 
   #k-input button {
-    border: none;
     padding: 0 16px;
+    border: none;
     background: var(--k-button-bg);
     color: var(--k-button-text);
     cursor: pointer;
@@ -159,13 +125,6 @@
 
   #k-input button:disabled {
     opacity: .6;
-    cursor: not-allowed;
-  }
-
-  body.k-dark {
-    --k-widget-bg: #0f172a;
-    --k-input-bg: #020617;
-    --k-input-text: #e5e7eb;
   }
   `;
   document.head.appendChild(style);
@@ -205,38 +164,19 @@
 
   if (darkMode) document.body.classList.add("k-dark");
 
-  /* ===================== FUNCTIONS ===================== */
   function applyTheme(t) {
     const r = document.documentElement.style;
-    r.setProperty("--k-header-bg", t.headerBg);
-    r.setProperty("--k-header-text", t.headerText);
-    r.setProperty("--k-user-bg", t.userBubbleBg);
-    r.setProperty("--k-user-text", t.userBubbleText);
-    r.setProperty("--k-bot-bg", t.botBubbleBg);
-    r.setProperty("--k-bot-text", t.botBubbleText);
-    r.setProperty("--k-widget-bg", t.widgetBg);
-    r.setProperty("--k-input-bg", t.inputBg);
-    r.setProperty("--k-input-text", t.inputText);
-    r.setProperty("--k-button-bg", t.buttonBg);
-    r.setProperty("--k-button-text", t.buttonText);
-    r.setProperty("--k-radius", t.radius + "px");
+    for (const key in t) {
+      r.setProperty("--k-" + key.replace(/[A-Z]/g, m => "-" + m.toLowerCase()), t[key]);
+    }
   }
 
   function add(text, cls) {
     const div = document.createElement("div");
     div.className = "k-msg " + cls;
-    div.textContent = text;
+    div.textContent = text || "(brak odpowiedzi)";
     messages.appendChild(div);
     messages.scrollTop = messages.scrollHeight;
-  }
-
-  function showTyping() {
-    const t = document.createElement("div");
-    t.className = "k-msg k-bot k-typing";
-    t.textContent = "Asystent pisze…";
-    messages.appendChild(t);
-    messages.scrollTop = messages.scrollHeight;
-    return t;
   }
 
   async function send() {
@@ -249,8 +189,6 @@
     add(text, "k-user");
     input.value = "";
 
-    const typing = showTyping();
-
     try {
       const res = await fetch(BACKEND_URL, {
         method: "POST",
@@ -259,17 +197,15 @@
       });
 
       const data = await res.json();
-      sessionId = data.sessionId;
+      sessionId = data.sessionId || sessionId;
 
       if (!theme && data.theme) {
         theme = data.theme;
         applyTheme(theme);
       }
 
-      typing.remove();
       add(data.reply, "k-bot");
-    } catch {
-      typing.remove();
+    } catch (e) {
       add("Błąd połączenia z serwerem.", "k-bot");
     } finally {
       isLoading = false;
@@ -278,7 +214,6 @@
     }
   }
 
-  /* ===================== EVENTS ===================== */
   launcher.onclick = () => {
     isOpen = !isOpen;
     widget.style.display = isOpen ? "flex" : "none";
@@ -301,4 +236,3 @@
     if (e.key === "Enter") send();
   });
 })();
-
