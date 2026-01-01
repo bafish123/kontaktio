@@ -35,7 +35,7 @@
     amico: {
       name: "AMICO",
       subtitle: "Pracownia Kamieniarska",
-      logo: "🪨",
+      logo: "",
       style: "brand",
       position: "right",
       bg: "#f7f6f2",
