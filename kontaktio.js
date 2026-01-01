@@ -44,7 +44,7 @@
       showQuick: true,
       quick: [
         "Jakie wykonujecie blaty?",
-        "Czy robicie schody z granitu?",
+        "Na jakich materiałach pracujecie?",
         "Jak się z Wami skontaktować?"
       ]
     },
