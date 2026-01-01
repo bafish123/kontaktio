@@ -38,7 +38,7 @@
           accent2: "#ea580c",
           accentSoft: "rgba(249,115,22,0.25)",
           name: "Asystent branżowy",
-          subtitle: "Konkretnie, warsztatowo, bez lania wody",
+          subtitle: "Konkretnie, warsztatowo, bez lania wody, Firma Kamieniarska",
           launcherIcon: "🛠️",
           widgetRadius: "18px",
           widgetBorder: "1px solid rgba(248,187,109,0.7)",
@@ -556,12 +556,12 @@
         "Podaj przykładowy scenariusz użycia dla firmy usługowej."
       ],
       amico: [
-        "Opisz, jak ten asystent może pomóc podczas szkoleń lub warsztatów.",
-        "Jak wygląda integracja techniczna krok po kroku?",
-        "Jakie dane ten asystent może wykorzystywać w firmie produkcyjnej?"
+        "Czym sie zajmujecie?",
+        "Na jakich materiałach pracujecie?",
+        "Czy można sie z wami skontaktować telefonicznie?"
       ],
       premium: [
-        "W jaki sposób ten asystent może obsługiwać klientów premium lub VIP?",
+        "W jaki sposób ten asystent może obsługiwać klientów?",
         "Jak można dopasować design widgetu do identyfikacji wizualnej marki?",
         "Co wyróżnia to rozwiązanie na tle zwykłych chatbotów?"
       ]
