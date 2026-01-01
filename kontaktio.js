@@ -9,19 +9,23 @@
   let sessionId = null;
   let isOpen = false;
   let isLoading = false;
-  let themeApplied = false;
   let darkMode = localStorage.getItem("kontaktio-dark") === "1";
 
   /* =========================
-     LAYOUT PRESETS (RÓŻNICE)
+     LAYOUT DEFINITIONS
      ========================= */
   const LAYOUTS = {
     demo: {
-      headerStyle: "saas",
-      title: "Kontaktio Demo",
-      subtitle: "Asystent AI dla firm",
-      showQuickBar: true,
-      quickBar: [
+      name: "Kontaktio Demo",
+      subtitle: "Asystent AI",
+      logo: "💬",
+      style: "saas",
+      position: "right",
+      bg: "#f8fafc",
+      primary: "#2563eb",
+      accent: "#3b82f6",
+      showQuick: true,
+      quick: [
         "Co potrafi ten asystent?",
         "Jak wygląda wdrożenie?",
         "Dla jakich firm to działa?"
@@ -29,11 +33,16 @@
     },
 
     amico: {
-      headerStyle: "brand",
-      title: "AMICO",
+      name: "AMICO",
       subtitle: "Pracownia Kamieniarska",
-      showQuickBar: true,
-      quickBar: [
+      logo: "🪨",
+      style: "brand",
+      position: "right",
+      bg: "#f7f6f2",
+      primary: "#111111",
+      accent: "#c9a24d",
+      showQuick: true,
+      quick: [
         "Jakie wykonujecie blaty?",
         "Czy robicie schody z granitu?",
         "Jak się z Wami skontaktować?"
@@ -41,21 +50,20 @@
     },
 
     premium: {
-      headerStyle: "luxury",
-      title: "Kontaktio Premium",
-      subtitle: "Obsługa klasy premium",
-      showQuickBar: false,
-      quickBar: []
+      name: "Kontaktio Premium",
+      subtitle: "Exclusive AI Assistant",
+      logo: "✦",
+      style: "luxury",
+      position: "center",
+      bg: "#020617",
+      primary: "#7c3aed",
+      accent: "#a78bfa",
+      showQuick: false,
+      quick: []
     }
   };
 
-  const LAYOUT = LAYOUTS[CLIENT_ID] || LAYOUTS.demo;
-
-  const START_MESSAGE = {
-    demo: "To jest wersja demonstracyjna asystenta Kontaktio.",
-    amico: "Jestem asystentem Pracowni Kamieniarskiej AMICO.",
-    premium: "Witaj w wersji premium asystenta Kontaktio."
-  };
+  const L = LAYOUTS[CLIENT_ID] || LAYOUTS.demo;
 
   /* =========================
      CSS
@@ -63,167 +71,140 @@
   const style = document.createElement("style");
   style.textContent = `
   :root {
-    --k-primary:#111;
-    --k-accent:#2563eb;
-    --k-bg:#f8fafc;
-    --k-bot:#e5e7eb;
+    --k-bg:${L.bg};
+    --k-primary:${L.primary};
+    --k-accent:${L.accent};
     --k-text:#111;
-    --k-radius:14px;
   }
 
   body.k-dark {
     --k-bg:#020617;
-    --k-bot:#1e293b;
     --k-text:#e5e7eb;
   }
 
   #k-launcher {
-    position:fixed;bottom:20px;right:20px;
-    width:56px;height:56px;border-radius:50%;
-    background:var(--k-primary);color:#fff;
-    display:flex;align-items:center;justify-content:center;
-    cursor:pointer;z-index:99999;
-    transition:transform .2s,box-shadow .2s;
-  }
-  #k-launcher:hover{
-    transform:scale(1.08);
-    box-shadow:0 14px 35px rgba(0,0,0,.4)
+    position:fixed;
+    ${L.position === "center" ? "left:50%;transform:translateX(-50%);" : "right:20px;"}
+    bottom:20px;
+    width:58px;height:58px;
+    border-radius:50%;
+    background:var(--k-primary);
+    color:#fff;
+    font-size:24px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    cursor:pointer;
+    z-index:99999;
+    box-shadow:0 10px 30px rgba(0,0,0,.35);
   }
 
   #k-widget {
-    position:fixed;bottom:90px;right:20px;
-    width:360px;height:560px;
+    position:fixed;
+    ${L.position === "center" ? "left:50%;transform:translateX(-50%) scale(.92);" : "right:20px;"}
+    bottom:90px;
+    width:${L.style === "luxury" ? "420px" : "360px"};
+    height:560px;
     background:var(--k-bg);
-    border-radius:var(--k-radius);
-    display:flex;flex-direction:column;
-    overflow:hidden;
-    box-shadow:0 30px 90px rgba(0,0,0,.5);
+    border-radius:${L.style === "luxury" ? "24px" : "14px"};
+    display:flex;
+    flex-direction:column;
+    box-shadow:0 40px 120px rgba(0,0,0,.6);
     opacity:0;
-    transform:translateY(30px) scale(.94);
     pointer-events:none;
-    transition:all .4s cubic-bezier(.16,1,.3,1);
+    transition:all .5s cubic-bezier(.16,1,.3,1);
     z-index:99999;
   }
-  #k-widget.open{
+
+  #k-widget.open {
     opacity:1;
-    transform:none;
+    transform:${L.position === "center" ? "translateX(-50%) scale(1)" : "none"};
     pointer-events:auto;
   }
 
-  /* ===== HEADERS ===== */
-  #k-header{
+  #k-header {
+    padding:${L.style === "brand" ? "18px" : "14px"};
+    background:${L.style === "saas"
+      ? "linear-gradient(135deg,#2563eb,#1e40af)"
+      : L.style === "brand"
+      ? "linear-gradient(135deg,#111,#c9a24d)"
+      : "linear-gradient(135deg,#020617,#0f172a)"};
     color:#fff;
-    padding:14px;
-    cursor:move;
     display:flex;
-    justify-content:space-between;
     align-items:center;
+    gap:12px;
+    cursor:move;
   }
 
-  .k-header-saas {
-    background:linear-gradient(135deg,#2563eb,#1e40af);
+  #k-header .logo {
+    font-size:${L.style === "luxury" ? "22px" : "20px"};
   }
 
-  .k-header-brand {
-    background:linear-gradient(135deg,#111,#c9a24d);
-    text-transform:uppercase;
-    letter-spacing:1px;
-  }
-
-  .k-header-luxury {
-    background:linear-gradient(135deg,#020617,#0f172a);
-    padding:18px;
-  }
-
-  #k-header small{
+  #k-header small {
     opacity:.75;
     font-size:12px;
   }
 
-  #k-header button{
-    background:none;border:none;color:#fff;
-    font-size:16px;cursor:pointer;margin-left:6px;
-  }
-
-  /* ===== QUICK BAR ===== */
-  #k-quickbar{
-    display:flex;
+  #k-quick {
+    display:${L.showQuick ? "grid" : "none"};
+    grid-template-columns:${L.style === "brand" ? "1fr 1fr" : "auto"};
     gap:8px;
-    padding:10px;
-    overflow-x:auto;
-    background:rgba(0,0,0,.04);
+    padding:12px;
   }
 
-  .k-quick{
-    white-space:nowrap;
-    font-size:12px;
-    padding:8px 12px;
-    border-radius:999px;
-    background:var(--k-accent);
-    color:#fff;
+  .k-q {
+    padding:10px;
+    border-radius:12px;
     border:none;
     cursor:pointer;
+    background:var(--k-accent);
+    color:#fff;
+    font-size:12px;
   }
 
-  #k-messages{
+  #k-messages {
     flex:1;
     padding:14px;
     overflow-y:auto;
+    color:var(--k-text);
   }
 
-  .k-msg{
+  .k-msg {
     max-width:80%;
     padding:10px 14px;
-    border-radius:14px;
     margin-bottom:10px;
+    border-radius:14px;
     font-size:14px;
-    animation:msgIn .25s ease;
   }
 
-  @keyframes msgIn{
-    from{opacity:0;transform:translateY(6px)}
-    to{opacity:1;transform:none}
-  }
-
-  .k-user{
+  .k-user {
     background:var(--k-primary);
     color:#fff;
     margin-left:auto;
   }
 
-  .k-bot{
-    background:var(--k-bot);
-    color:var(--k-text);
+  .k-bot {
+    background:${L.style === "luxury" ? "#0f172a" : "#e5e7eb"};
+    color:${L.style === "luxury" ? "#e5e7eb" : "#111"};
   }
 
-  .k-typing{
-    font-size:12px;
-    opacity:.6;
-    animation:pulse 1.2s infinite;
-  }
-
-  @keyframes pulse{
-    0%{opacity:.3}
-    50%{opacity:.8}
-    100%{opacity:.3}
-  }
-
-  #k-input{
+  #k-input {
     display:flex;
+    padding:12px;
+    gap:8px;
     border-top:1px solid rgba(0,0,0,.1);
   }
 
-  #k-input input{
+  #k-input input {
     flex:1;
     padding:12px;
-    border:none;
-    outline:none;
-    background:transparent;
-    color:var(--k-text);
+    border-radius:12px;
+    border:1px solid #ddd;
   }
 
-  #k-input button{
-    padding:0 16px;
+  #k-input button {
+    padding:0 18px;
+    border-radius:12px;
     border:none;
     background:var(--k-primary);
     color:#fff;
@@ -237,31 +218,28 @@
      ========================= */
   const launcher = document.createElement("div");
   launcher.id = "k-launcher";
-  launcher.textContent = "💬";
+  launcher.textContent = L.logo;
 
   const widget = document.createElement("div");
   widget.id = "k-widget";
   widget.innerHTML = `
-    <div id="k-header" class="k-header-${LAYOUT.headerStyle}">
+    <div id="k-header">
+      <div class="logo">${L.logo}</div>
       <div>
-        <strong>${LAYOUT.title}</strong><br>
-        <small>${LAYOUT.subtitle}</small>
-      </div>
-      <div>
-        <button id="k-theme">🌓</button>
-        <button id="k-close">✕</button>
+        <strong>${L.name}</strong><br>
+        <small>${L.subtitle}</small>
       </div>
     </div>
 
-    ${LAYOUT.showQuickBar ? `<div id="k-quickbar"></div>` : ``}
+    <div id="k-quick"></div>
 
     <div id="k-messages">
-      <div class="k-msg k-bot">${START_MESSAGE[CLIENT_ID]}</div>
+      <div class="k-msg k-bot">W czym mogę pomóc?</div>
     </div>
 
     <div id="k-input">
-      <input id="k-text" placeholder="Napisz wiadomość…" />
-      <button id="k-send">Wyślij</button>
+      <input placeholder="Napisz wiadomość…" />
+      <button>Wyślij</button>
     </div>
   `;
 
@@ -269,114 +247,59 @@
   document.body.appendChild(widget);
 
   const messages = widget.querySelector("#k-messages");
-  const input = widget.querySelector("#k-text");
-  const sendBtn = widget.querySelector("#k-send");
-  const closeBtn = widget.querySelector("#k-close");
-  const themeBtn = widget.querySelector("#k-theme");
-  const header = widget.querySelector("#k-header");
-  const quickbar = widget.querySelector("#k-quickbar");
+  const input = widget.querySelector("input");
+  const sendBtn = widget.querySelector("button");
+  const quick = widget.querySelector("#k-quick");
 
-  if (darkMode) document.body.classList.add("k-dark");
-
-  /* ===== QUICK BAR ===== */
-  if (quickbar && LAYOUT.quickBar) {
-    LAYOUT.quickBar.forEach(q => {
+  if (L.showQuick) {
+    L.quick.forEach(q => {
       const b = document.createElement("button");
-      b.className = "k-quick";
+      b.className = "k-q";
       b.textContent = q;
       b.onclick = () => {
         input.value = q;
         send();
       };
-      quickbar.appendChild(b);
+      quick.appendChild(b);
     });
   }
 
   function add(text, cls) {
     const div = document.createElement("div");
     div.className = "k-msg " + cls;
-    div.textContent = text || "—";
+    div.textContent = text;
     messages.appendChild(div);
     messages.scrollTop = messages.scrollHeight;
-    return div;
   }
 
   async function send() {
     const text = input.value.trim();
     if (!text || isLoading) return;
-
     isLoading = true;
+
     add(text, "k-user");
     input.value = "";
-
-    const typing = add("Asystent pisze…", "k-bot k-typing");
 
     try {
       const res = await fetch(BACKEND_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: text,
-          sessionId,
-          clientId: CLIENT_ID
-        })
+        body: JSON.stringify({ message: text, sessionId, clientId: CLIENT_ID })
       });
 
       const data = await res.json();
       sessionId = data.sessionId || sessionId;
-
-      if (!themeApplied && data.theme) {
-        const r = document.documentElement.style;
-        Object.entries(data.theme).forEach(([k, v]) => {
-          r.setProperty(`--k-${k}`, v);
-        });
-        themeApplied = true;
-      }
-
-      typing.remove();
       add(data.reply, "k-bot");
     } catch {
-      typing.remove();
-      add("Błąd połączenia z serwerem.", "k-bot");
+      add("Błąd połączenia.", "k-bot");
     } finally {
       isLoading = false;
-      input.focus();
     }
   }
 
-  /* ===== DRAG ===== */
-  let dragging = false, ox = 0, oy = 0;
-  header.addEventListener("mousedown", e => {
-    dragging = true;
-    const r = widget.getBoundingClientRect();
-    ox = e.clientX - r.left;
-    oy = e.clientY - r.top;
-  });
-  document.addEventListener("mousemove", e => {
-    if (!dragging) return;
-    widget.style.left = e.clientX - ox + "px";
-    widget.style.top = e.clientY - oy + "px";
-    widget.style.right = "auto";
-    widget.style.bottom = "auto";
-  });
-  document.addEventListener("mouseup", () => dragging = false);
-
-  /* ===== EVENTS ===== */
   launcher.onclick = () => {
     isOpen = !isOpen;
     widget.classList.toggle("open", isOpen);
-    if (isOpen) input.focus();
-  };
-
-  closeBtn.onclick = () => {
-    isOpen = false;
-    widget.classList.remove("open");
-  };
-
-  themeBtn.onclick = () => {
-    darkMode = !darkMode;
-    document.body.classList.toggle("k-dark", darkMode);
-    localStorage.setItem("kontaktio-dark", darkMode ? "1" : "0");
   };
 
   sendBtn.onclick = send;
