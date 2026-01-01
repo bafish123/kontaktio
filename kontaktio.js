@@ -5,7 +5,6 @@
   const script = document.currentScript;
   const CLIENT_ID = script?.getAttribute("data-client") || "demo";
 
-  // Dostosuj do swojego backendu
   const BACKEND_URL = "https://chatbot-backend-x2cy.onrender.com/chat";
 
   let sessionId = null;
@@ -15,46 +14,62 @@
   const STORAGE_KEY_HISTORY = `kontaktio-history-${CLIENT_ID}`;
   const STORAGE_KEY_SESSION = `kontaktio-session-${CLIENT_ID}`;
 
-  const THEME = {
-    demo: {
-      accent: "#22d3ee",
-      accent2: "#2563eb",
-      accentSoft: "rgba(34,211,238,0.25)",
-      name: "Asystent demo",
-      subtitle: "Wyjaśnia, pokazuje, edukuje",
-      launcherIcon: "💬"
-    },
-    amico: {
-      accent: "#f97316",
-      accent2: "#ea580c",
-      accentSoft: "rgba(249,115,22,0.25)",
-      name: "Asystent branżowy",
-      subtitle: "Konkretnie, warsztatowo, bez lania wody",
-      launcherIcon: "🛠️"
-    },
-    premium: {
-      accent: "#a855f7",
-      accent2: "#7c3aed",
-      accentSoft: "rgba(168,85,247,0.25)",
-      name: "Asystent premium",
-      subtitle: "Elegancki, spokojny, ekskluzywny ton",
-      launcherIcon: "✨"
-    }
-  }[CLIENT_ID] || {
+  document.body.classList.add("k-theme-" + CLIENT_ID);
+
+  const BASE_THEME = {
     accent: "#22d3ee",
     accent2: "#2563eb",
     accentSoft: "rgba(34,211,238,0.25)",
-    name: "Asystent AI",
-    subtitle: "Odpowiada na pytania w czasie rzeczywistym",
-    launcherIcon: "✦"
+    name: "Asystent demo",
+    subtitle: "Wyjaśnia, pokazuje, edukuje",
+    launcherIcon: "💬",
+    widgetRadius: "22px",
+    widgetBorder: "1px solid rgba(148,163,184,.55)",
+    widgetShadow: "0 26px 90px rgba(15,23,42,1)",
+    headerStripe: "transparent",
+    agentBubbleExtra: ""
   };
 
-  // proste dźwięki (możesz podmienić na swoje URL-e)
+  const THEME =
+    CLIENT_ID === "amico"
+      ? {
+          ...BASE_THEME,
+          accent: "#f97316",
+          accent2: "#ea580c",
+          accentSoft: "rgba(249,115,22,0.25)",
+          name: "Asystent branżowy",
+          subtitle: "Konkretnie, warsztatowo, bez lania wody",
+          launcherIcon: "🛠️",
+          widgetRadius: "18px",
+          widgetBorder: "1px solid rgba(248,187,109,0.7)",
+          widgetShadow: "0 24px 70px rgba(120,53,15,0.9)",
+          headerStripe:
+            "linear-gradient(90deg, rgba(249,115,22,0.45), transparent 60%)",
+          agentBubbleExtra: "border-left: 2px solid rgba(249,115,22,0.7);"
+        }
+      : CLIENT_ID === "premium"
+      ? {
+          ...BASE_THEME,
+          accent: "#a855f7",
+          accent2: "#7c3aed",
+          accentSoft: "rgba(168,85,247,0.25)",
+          name: "Asystent premium",
+          subtitle: "Elegancki, spokojny, ekskluzywny ton",
+          launcherIcon: "✨",
+          widgetRadius: "26px",
+          widgetBorder: "1px solid rgba(209,213,219,0.65)",
+          widgetShadow: "0 30px 90px rgba(15,23,42,0.98)",
+          headerStripe:
+            "linear-gradient(90deg, rgba(168,85,247,0.45), transparent 60%)",
+          agentBubbleExtra:
+            "box-shadow: 0 0 0 1px rgba(168,85,247,0.45);"
+        }
+      : BASE_THEME;
+
   const SOUNDS = {
     open: null,
     send: null,
     receive: null
-    // np. new Audio("https://.../open.mp3")
   };
 
   function playSound(key) {
@@ -66,7 +81,7 @@
     } catch {}
   }
 
-  // ---------------- STYLE MAX PRO ----------------
+  /* ---------------- STYLE ---------------- */
   const style = document.createElement("style");
   style.textContent = `
   #k-launcher {
@@ -75,7 +90,7 @@
     bottom: 20px;
     width: 56px;
     height: 56px;
-    border-radius: 999px;
+    border-radius: ${CLIENT_ID === "amico" ? "16px" : "999px"};
     border: 1px solid rgba(148,163,184,.65);
     background:
       radial-gradient(circle at 30% 0, ${THEME.accentSoft}, rgba(15,23,42,0.98)),
@@ -89,7 +104,7 @@
     cursor: pointer;
     z-index: 9999;
     color: #e5e7eb;
-    transition: transform .18s ease, box-shadow .18s ease, background .22s ease;
+    transition: transform .18s ease, box-shadow .18s ease, background .22s ease, border-radius .22s ease;
     backdrop-filter: blur(16px);
   }
   #k-launcher:hover {
@@ -113,11 +128,9 @@
     height: min(560px, calc(100vh - 120px));
     background:
       radial-gradient(circle at top left, rgba(15,23,42,0.96), rgba(15,23,42,1));
-    border-radius: 22px;
-    box-shadow:
-      0 26px 90px rgba(15,23,42,1),
-      0 0 0 1px rgba(30,64,175,0.4);
-    border: 1px solid rgba(148,163,184,.55);
+    border-radius: ${THEME.widgetRadius};
+    box-shadow: ${THEME.widgetShadow};
+    border: ${THEME.widgetBorder};
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -138,7 +151,7 @@
       width: auto;
       bottom: 80px;
       height: min(520px, calc(100vh - 110px));
-      border-radius: 18px;
+      border-radius: ${CLIENT_ID === "premium" ? "24px" : "18px"};
     }
     #k-launcher {
       right: 16px;
@@ -153,6 +166,7 @@
     gap: 10px;
     border-bottom: 1px solid rgba(15,23,42,1);
     background:
+      ${THEME.headerStripe},
       linear-gradient(135deg, rgba(15,23,42,0.95), rgba(15,23,42,1));
     position: relative;
     overflow: hidden;
@@ -175,8 +189,8 @@
     flex:1;
   }
   #k-avatar {
-    width: 30px;
-    height: 30px;
+    width: ${CLIENT_ID === "premium" ? "32px" : "30px"};
+    height: ${CLIENT_ID === "premium" ? "32px" : "30px"};
     border-radius: 999px;
     background:
       radial-gradient(circle at 30% 0, #ffffff, ${THEME.accent2});
@@ -274,6 +288,7 @@
     background: rgba(15,23,42,0.96);
     border: 1px solid rgba(51,65,85,0.9);
     border-bottom-left-radius: 3px;
+    ${THEME.agentBubbleExtra}
   }
 
   .k-msg-time {
@@ -291,7 +306,7 @@
     background: linear-gradient(180deg, rgba(15,23,42,0.98), rgba(15,23,42,1));
   }
   .k-quick-btn {
-    border-radius: 999px;
+    border-radius: ${CLIENT_ID === "amico" ? "6px" : "999px"};
     border: 1px solid rgba(148,163,184,0.6);
     padding: 4px 8px;
     font-size: 11px;
@@ -385,7 +400,7 @@
   `;
   document.head.appendChild(style);
 
-  // ---------------- DOM ----------------
+  /* ---------------- DOM ---------------- */
   function createLauncher() {
     const launcher = document.createElement("div");
     launcher.id = "k-launcher";
@@ -411,7 +426,7 @@
           </div>
         </div>
         <div id="k-header-right">
-          <div id="k-pill">Live • AI</div>
+          <div id="k-pill">${CLIENT_ID === "premium" ? "Premium • AI" : CLIENT_ID === "amico" ? "Branżowy • AI" : "Demo • AI"}</div>
           <button id="k-header-close" aria-label="Zamknij">&times;</button>
         </div>
       </div>
@@ -463,7 +478,7 @@
     }
   }
 
-  // ---------------- MESSAGES ----------------
+  /* ---------------- MESSAGES ---------------- */
   function formatTime(d) {
     try {
       const dt = typeof d === "string" ? new Date(d) : d;
@@ -528,7 +543,7 @@
     return messages.children.length > 0;
   }
 
-  // ---------------- QUICK ACTIONS ----------------
+  /* ---------------- QUICK ACTIONS ---------------- */
   function setupQuickActions() {
     const quick = document.getElementById("k-quick");
     if (!quick) return;
@@ -566,7 +581,7 @@
     });
   }
 
-  // ---------------- HISTORY ----------------
+  /* ---------------- HISTORY ---------------- */
   function saveHistory(messages) {
     try {
       localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(messages));
@@ -594,12 +609,11 @@
   function pushToHistory(text, from) {
     const history = loadHistory();
     history.push({ text, from, time: new Date().toISOString() });
-    // proste ograniczenie rozmiaru
     while (history.length > 50) history.shift();
     saveHistory(history);
   }
 
-  // ---------------- BACKEND ----------------
+  /* ---------------- BACKEND ---------------- */
   async function sendMessage() {
     if (isSending) return;
     const input = document.getElementById("k-input");
@@ -610,7 +624,7 @@
     appendMessage(text, "user");
     pushToHistory(text, "user");
     input.value = "";
-    input.style.height = "40px"; // reset
+    input.style.height = "40px";
     isSending = true;
     const sendBtn = document.getElementById("k-send");
     if (sendBtn) sendBtn.disabled = true;
@@ -676,6 +690,6 @@
     pushToHistory(text, "agent");
   }
 
-  // ---------------- INIT ----------------
+  /* ---------------- INIT ---------------- */
   createLauncher();
 })();
