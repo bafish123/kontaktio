@@ -37,8 +37,7 @@
     amico: {
       name: "AMICO",
       subtitle: "Pracownia Kamieniarska",
-      logoType: "image",
-      logo: "https://YOUR_LOGO_LINK/logo-amico.svg",
+      logo: "AMICO",
       bg: "#f7f6f2",
       primary: "#111111",
       accent: "#c9a24d",
