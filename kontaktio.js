@@ -2,19 +2,42 @@
   if (window.KontaktioLoaded) return;
   window.KontaktioLoaded = true;
 
-  const script = document.currentScript;
+  /* ---------------- CONFIG & STATE ---------------- */
+
+  const script =
+    document.currentScript ||
+    document.querySelector('script[data-client][data-kontaktio]');
+
   const CLIENT_ID = script?.getAttribute("data-client") || "demo";
 
-  const BACKEND_URL = "https://chatbot-backend-x2cy.onrender.com/chat";
+  const BACKEND_URL =
+    script?.getAttribute("data-backend") ||
+    "https://chatbot-backend-x2cy.onrender.com/chat";
+
+  const CONFIG_URL = script?.getAttribute("data-config") || null;
+
+  const AUTO_OPEN = script?.getAttribute("data-auto-open") === "true";
+  const AUTO_OPEN_DELAY =
+    parseInt(script?.getAttribute("data-auto-open-delay"), 10) || 15000;
+
+  const MAX_HISTORY_ITEMS = 50;
+  const MAX_DOM_MESSAGES = 120;
+  const MAX_USER_MESSAGE_LENGTH = 1200;
+
+  const STORAGE_KEY_HISTORY = `kontaktio-history-${CLIENT_ID}`;
+  const STORAGE_KEY_SESSION = `kontaktio-session-${CLIENT_ID}`;
+  const STORAGE_KEY_OPEN = `kontaktio-open-${CLIENT_ID}`;
 
   let sessionId = null;
   let isOpen = false;
   let isSending = false;
-
-  const STORAGE_KEY_HISTORY = `kontaktio-history-${CLIENT_ID}`;
-  const STORAGE_KEY_SESSION = `kontaktio-session-${CLIENT_ID}`;
+  let clientActive = true;
+  let clientStatusMessage = null;
+  let launcherCreated = false;
 
   document.body.classList.add("k-theme-" + CLIENT_ID);
+
+  /* ---------------- THEME ---------------- */
 
   const BASE_THEME = {
     accent: "#22d3ee",
@@ -38,7 +61,8 @@
           accent2: "#ea580c",
           accentSoft: "rgba(249,115,22,0.25)",
           name: "Asystent branżowy",
-          subtitle: "Konkretnie, warsztatowo, bez lania wody, Firma Kamieniarska",
+          subtitle:
+            "Konkretnie, warsztatowo, bez lania wody, Firma Kamieniarska",
           launcherIcon: "🛠️",
           widgetRadius: "18px",
           widgetBorder: "1px solid rgba(248,187,109,0.7)",
@@ -66,6 +90,8 @@
         }
       : BASE_THEME;
 
+  /* ---------------- SOUNDS (hook pod przyszłość) ---------------- */
+
   const SOUNDS = {
     open: null,
     send: null,
@@ -81,7 +107,184 @@
     } catch {}
   }
 
+  /* ---------------- HELPERS ---------------- */
+
+  function dispatchEvent(name, detail) {
+    try {
+      window.dispatchEvent(
+        new CustomEvent(`kontaktio:${name}`, { detail: detail || {} })
+      );
+    } catch {}
+  }
+
+  function formatTime(d) {
+    try {
+      const dt = typeof d === "string" ? new Date(d) : d;
+      return dt.toLocaleTimeString("pl-PL", {
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+    } catch {
+      return "";
+    }
+  }
+
+  function escapeHtml(str) {
+    return str
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  // prosty parser: linki + nowe linie, minimalny markdown
+  function renderMessageContent(text) {
+    if (!text) return "";
+    let safe = escapeHtml(text);
+
+    // pogrubienie **tekst**
+    safe = safe.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+
+    // proste listy: linie zaczynające się od "- "
+    if (safe.includes("- ")) {
+      const lines = safe.split(/\n/);
+      let inList = false;
+      let out = "";
+      for (const line of lines) {
+        if (line.trim().startsWith("- ")) {
+          if (!inList) {
+            inList = true;
+            out += "<ul>";
+          }
+          out += `<li>${line.trim().slice(2)}</li>`;
+        } else {
+          if (inList) {
+            inList = false;
+            out += "</ul>";
+          }
+          if (line.trim()) {
+            out += `<p>${line}</p>`;
+          } else {
+            out += "<br/>";
+          }
+        }
+      }
+      if (inList) out += "</ul>";
+      safe = out;
+    } else {
+      // zwykłe nowe linie
+      safe = safe.replace(/\n/g, "<br/>");
+    }
+
+    // linki
+    const urlRegex =
+      /\b(https?:\/\/[^\s<]+[^\s<\.)])/gi;
+    safe = safe.replace(
+      urlRegex,
+      '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>'
+    );
+
+    return safe;
+  }
+
+  function saveHistory(messages) {
+    try {
+      localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(messages));
+    } catch {}
+  }
+
+  function loadHistory() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY_HISTORY);
+      if (!raw) return [];
+      return JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+
+  function saveSessionId(id) {
+    try {
+      localStorage.setItem(STORAGE_KEY_SESSION, id);
+    } catch {}
+  }
+
+  function loadSessionId() {
+    try {
+      return localStorage.getItem(STORAGE_KEY_SESSION);
+    } catch {
+      return null;
+    }
+  }
+
+  function saveOpenState(open) {
+    try {
+      localStorage.setItem(STORAGE_KEY_OPEN, open ? "1" : "0");
+    } catch {}
+  }
+
+  function loadOpenState() {
+    try {
+      return localStorage.getItem(STORAGE_KEY_OPEN) === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  function hasMessages() {
+    const messages = document.getElementById("k-messages");
+    if (!messages) return false;
+    // odfiltrowujemy typing itp.
+    return messages.querySelector(".k-msg-row") !== null;
+  }
+
+  function trimDomMessages() {
+    const messages = document.getElementById("k-messages");
+    if (!messages) return;
+    const rows = messages.querySelectorAll(".k-msg-row");
+    if (rows.length <= MAX_DOM_MESSAGES) return;
+    const toRemove = rows.length - MAX_DOM_MESSAGES;
+    for (let i = 0; i < toRemove; i++) {
+      const row = rows[i];
+      const wrap = row.parentElement;
+      if (wrap && wrap.parentElement === messages) {
+        messages.removeChild(wrap);
+      }
+    }
+  }
+
+  function withTimeout(promise, ms) {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("timeout")), ms)
+      )
+    ]);
+  }
+
+  /* ---------------- CLIENT STATUS ---------------- */
+
+  async function checkClientStatus() {
+    if (!CONFIG_URL) return; // brak configu – frontend nie blokuje, polega na backendzie
+
+    try {
+      const res = await fetch(CONFIG_URL, { cache: "no-store" });
+      if (!res.ok) return;
+      const cfg = await res.json();
+      const client = cfg[CLIENT_ID];
+
+      if (!client || client.status !== "active") {
+        clientActive = false;
+        clientStatusMessage =
+          client?.statusMessage ||
+          "Asystent jest obecnie niedostępny. Skontaktuj się bezpośrednio z firmą.";
+      }
+    } catch (e) {
+      console.warn("[Kontaktio] Nie udało się pobrać statusu klienta:", e);
+    }
+  }
+
   /* ---------------- STYLE ---------------- */
+
   const style = document.createElement("style");
   style.textContent = `
   #k-launcher {
@@ -104,7 +307,7 @@
     cursor: pointer;
     z-index: 9999;
     color: #e5e7eb;
-    transition: transform .18s ease, box-shadow .18s ease, background .22s ease, border-radius .22s ease;
+    transition: transform .18s ease, box-shadow .18s ease, background .22s ease, border-radius .22s ease, box-shadow .3s ease;
     backdrop-filter: blur(16px);
   }
   #k-launcher:hover {
@@ -115,6 +318,17 @@
     background:
       radial-gradient(circle at 20% 0, ${THEME.accentSoft}, rgba(15,23,42,0.95)),
       linear-gradient(145deg, rgba(15,23,42,0.98), rgba(15,23,42,1));
+  }
+  #k-launcher.k-has-unread {
+    box-shadow:
+      0 0 0 0 rgba(56,189,248,0.8),
+      0 18px 55px rgba(15,23,42,0.98);
+    animation: k-pulse 1.8s infinite;
+  }
+  @keyframes k-pulse {
+    0% { box-shadow: 0 0 0 0 rgba(56,189,248,0.7), 0 18px 55px rgba(15,23,42,0.98); }
+    70% { box-shadow: 0 0 0 10px rgba(56,189,248,0), 0 18px 55px rgba(15,23,42,0.98); }
+    100% { box-shadow: 0 0 0 0 rgba(56,189,248,0), 0 18px 55px rgba(15,23,42,0.98); }
   }
   #k-launcher-icon {
     font-size: 22px;
@@ -263,6 +477,11 @@
   .k-msg-row {
     margin-bottom: 8px;
     display: flex;
+    animation: k-bubble-in .18s ease-out;
+  }
+  @keyframes k-bubble-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
   }
   .k-msg-user {
     justify-content: flex-end;
@@ -277,6 +496,7 @@
     border-radius: 12px;
     line-height: 1.35;
     position: relative;
+    word-wrap: break-word;
   }
   .k-msg-bubble-user {
     background: linear-gradient(135deg, ${THEME.accent}, ${THEME.accent2});
@@ -289,6 +509,29 @@
     border: 1px solid rgba(51,65,85,0.9);
     border-bottom-left-radius: 3px;
     ${THEME.agentBubbleExtra}
+  }
+  .k-msg-bubble a {
+    color: ${THEME.accent};
+    text-decoration: underline;
+  }
+
+  .k-quick-replies {
+    margin-top: 4px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .k-quick-reply-btn {
+    border-radius: 999px;
+    border: 1px solid rgba(148,163,184,0.6);
+    padding: 2px 7px;
+    font-size: 10px;
+    background: rgba(15,23,42,0.9);
+    color: #cbd5e1;
+    cursor: pointer;
+  }
+  .k-quick-reply-btn:hover {
+    border-color: ${THEME.accent};
   }
 
   .k-msg-time {
@@ -397,109 +640,66 @@
     50%{ transform: translateY(-2px); opacity:1; }
     100%{ transform: translateY(0); opacity:.6; }
   }
+
+  .k-status-banner {
+    font-size: 11px;
+    padding: 6px 10px;
+    border-bottom: 1px solid rgba(30,64,175,0.7);
+    background: rgba(15,23,42,0.95);
+    color: #e5e7eb;
+  }
+  .k-clear-btn {
+    font-size: 10px;
+    background: transparent;
+    border: 1px solid rgba(148,163,184,0.6);
+    border-radius: 999px;
+    padding: 2px 6px;
+    color: #cbd5e1;
+    cursor: pointer;
+    margin-left: 8px;
+  }
+  .k-clear-btn:hover {
+    border-color: ${THEME.accent};
+  }
   `;
   document.head.appendChild(style);
 
-  /* ---------------- DOM ---------------- */
-  function createLauncher() {
-    const launcher = document.createElement("div");
-    launcher.id = "k-launcher";
-    launcher.innerHTML = `<div id="k-launcher-icon">${THEME.launcherIcon}</div>`;
-    launcher.addEventListener("click", toggleWidget);
-    document.body.appendChild(launcher);
-  }
-
-  function createWidget() {
-    if (document.getElementById("k-widget")) return;
-
-    const wrap = document.createElement("div");
-    wrap.id = "k-widget";
-    wrap.innerHTML = `
-      <div id="k-header">
-        <div id="k-header-inner">
-          <div id="k-avatar">
-            ${CLIENT_ID === "premium" ? "KP" : CLIENT_ID === "amico" ? "BA" : "AI"}
-          </div>
-          <div id="k-header-text">
-            <strong>${THEME.name}</strong>
-            <span>${THEME.subtitle}</span>
-          </div>
-        </div>
-        <div id="k-header-right">
-          <div id="k-pill">${CLIENT_ID === "premium" ? "Premium • AI" : CLIENT_ID === "amico" ? "Branżowy • AI" : "Demo • AI"}</div>
-          <button id="k-header-close" aria-label="Zamknij">&times;</button>
-        </div>
-      </div>
-      <div id="k-messages"></div>
-      <div id="k-quick"></div>
-      <div id="k-input-area">
-        <textarea id="k-input" placeholder="Napisz wiadomość..." rows="1"></textarea>
-        <button id="k-send">➤</button>
-      </div>
-    `;
-    document.body.appendChild(wrap);
-
-    document.getElementById("k-header-close").onclick = toggleWidget;
-    const input = document.getElementById("k-input");
-    const sendBtn = document.getElementById("k-send");
-
-    input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        sendMessage();
-      }
-    });
-
-    input.addEventListener("input", () => {
-      input.style.height = "auto";
-      input.style.height = Math.min(input.scrollHeight, 80) + "px";
-    });
-
-    sendBtn.addEventListener("click", sendMessage);
-    setupQuickActions();
-    restoreHistory();
-    if (!hasMessages()) {
-      showWelcomeMessage();
-    }
-  }
-
-  function toggleWidget() {
-    const widget = document.getElementById("k-widget");
-    if (!widget) {
-      createWidget();
-      isOpen = true;
-      playSound("open");
-      return;
-    }
-    isOpen = !isOpen;
-    widget.style.display = isOpen ? "flex" : "none";
-    if (isOpen) {
-      playSound("open");
-    }
-  }
-
-  /* ---------------- MESSAGES ---------------- */
-  function formatTime(d) {
-    try {
-      const dt = typeof d === "string" ? new Date(d) : d;
-      return dt.toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" });
-    } catch {
-      return "";
-    }
-  }
+  /* ---------------- DOM: MESSAGES ---------------- */
 
   function appendMessage(text, from = "agent", meta = {}) {
     const messages = document.getElementById("k-messages");
     if (!messages) return;
 
     const row = document.createElement("div");
-    row.className = "k-msg-row " + (from === "user" ? "k-msg-user" : "k-msg-agent");
+    row.className =
+      "k-msg-row " + (from === "user" ? "k-msg-user" : "k-msg-agent");
 
     const bubble = document.createElement("div");
-    bubble.className = "k-msg-bubble " + (from === "user" ? "k-msg-bubble-user" : "k-msg-bubble-agent");
-    bubble.textContent = text;
+    bubble.className =
+      "k-msg-bubble " +
+      (from === "user" ? "k-msg-bubble-user" : "k-msg-bubble-agent");
+    bubble.innerHTML = renderMessageContent(text);
 
     row.appendChild(bubble);
+
+    // opcjonalne quick replies (na przyszłość – można podać w meta.quickReplies)
+    if (meta.quickReplies && Array.isArray(meta.quickReplies)) {
+      const qrWrap = document.createElement("div");
+      qrWrap.className = "k-quick-replies";
+      meta.quickReplies.forEach((q) => {
+        const btn = document.createElement("button");
+        btn.className = "k-quick-reply-btn";
+        btn.textContent = q;
+        btn.onclick = () => {
+          const input = document.getElementById("k-input");
+          if (!input || input.disabled) return;
+          input.value = q;
+          sendMessage();
+        };
+        qrWrap.appendChild(btn);
+      });
+      bubble.appendChild(qrWrap);
+    }
 
     const time = meta.time || new Date();
     const timeLabel = document.createElement("div");
@@ -511,7 +711,9 @@
     wrap.appendChild(timeLabel);
 
     messages.appendChild(wrap);
-    messages.scrollTop = messages.scrollHeight;
+    messages.scrollTop = messages.scrollHeight + 40;
+
+    trimDomMessages();
   }
 
   let typingEl = null;
@@ -537,43 +739,52 @@
     typingEl = null;
   }
 
-  function hasMessages() {
-    const messages = document.getElementById("k-messages");
-    if (!messages) return false;
-    return messages.children.length > 0;
-  }
-
   /* ---------------- QUICK ACTIONS ---------------- */
+
   function setupQuickActions() {
     const quick = document.getElementById("k-quick");
     if (!quick) return;
     quick.innerHTML = "";
 
-    const sets = {
-      demo: [
-        "Wyjaśnij, jak działa ten asystent na stronie klienta.",
-        "Jak mogę dopasować styl rozmowy do mojej marki?",
-        "Podaj przykładowy scenariusz użycia dla firmy usługowej."
-      ],
-      amico: [
-        "Czym sie zajmujecie?",
-        "Na jakich materiałach pracujecie?",
-        "Czy można sie z wami skontaktować telefonicznie?"
-      ],
-      premium: [
-        "W jaki sposób ten asystent może obsługiwać klientów?",
-        "Jak można dopasować design widgetu do identyfikacji wizualnej marki?",
-        "Co wyróżnia to rozwiązanie na tle zwykłych chatbotów?"
-      ]
-    }[CLIENT_ID] || [];
+    const dataQuick = script?.getAttribute("data-quick");
+    let sets = [];
 
-    sets.forEach(text => {
+    if (dataQuick) {
+      try {
+        const parsed = JSON.parse(dataQuick);
+        if (Array.isArray(parsed)) sets = parsed;
+      } catch {
+        // fallback do zdefiniowanych niżej
+      }
+    }
+
+    if (!sets.length) {
+      sets = {
+        demo: [
+          "Wyjaśnij, jak działa ten asystent na stronie klienta.",
+          "Jak mogę dopasować styl rozmowy do mojej marki?",
+          "Podaj przykładowy scenariusz użycia dla firmy usługowej."
+        ],
+        amico: [
+          "Czym sie zajmujecie?",
+          "Na jakich materiałach pracujecie?",
+          "Czy można sie z wami skontaktować telefonicznie?"
+        ],
+        premium: [
+          "W jaki sposób ten asystent może obsługiwać klientów?",
+          "Jak można dopasować design widgetu do identyfikacji wizualnej marki?",
+          "Co wyróżnia to rozwiązanie na tle zwykłych chatbotów?"
+        ]
+      }[CLIENT_ID] || [];
+    }
+
+    sets.forEach((text) => {
       const btn = document.createElement("button");
       btn.className = "k-quick-btn";
       btn.textContent = text;
       btn.onclick = () => {
         const input = document.getElementById("k-input");
-        if (!input) return;
+        if (!input || input.disabled) return;
         input.value = text;
         sendMessage();
       };
@@ -582,26 +793,11 @@
   }
 
   /* ---------------- HISTORY ---------------- */
-  function saveHistory(messages) {
-    try {
-      localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(messages));
-    } catch {}
-  }
-
-  function loadHistory() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY_HISTORY);
-      if (!raw) return [];
-      return JSON.parse(raw);
-    } catch {
-      return [];
-    }
-  }
 
   function restoreHistory() {
     const history = loadHistory();
     if (!history.length) return;
-    history.forEach(msg => {
+    history.forEach((msg) => {
       appendMessage(msg.text, msg.from, { time: msg.time });
     });
   }
@@ -609,17 +805,35 @@
   function pushToHistory(text, from) {
     const history = loadHistory();
     history.push({ text, from, time: new Date().toISOString() });
-    while (history.length > 50) history.shift();
+    while (history.length > MAX_HISTORY_ITEMS) history.shift();
     saveHistory(history);
   }
 
   /* ---------------- BACKEND ---------------- */
+
   async function sendMessage() {
     if (isSending) return;
     const input = document.getElementById("k-input");
-    if (!input) return;
+    if (!input || input.disabled) return;
+
     const text = input.value.trim();
     if (!text) return;
+
+    if (text.length > MAX_USER_MESSAGE_LENGTH) {
+      appendMessage(
+        "Twoja wiadomość jest dość długa. Spróbuj proszę zadać krótsze, bardziej konkretne pytanie.",
+        "agent"
+      );
+      return;
+    }
+
+    if (!navigator.onLine) {
+      appendMessage(
+        "Wygląda na to, że nie masz połączenia z internetem. Spróbuj ponownie, gdy połączenie wróci.",
+        "agent"
+      );
+      return;
+    }
 
     appendMessage(text, "user");
     pushToHistory(text, "user");
@@ -630,6 +844,7 @@
     if (sendBtn) sendBtn.disabled = true;
     showTyping();
     playSound("send");
+    dispatchEvent("messageSent", { clientId: CLIENT_ID, message: text });
 
     try {
       const payload = {
@@ -638,14 +853,58 @@
         clientId: CLIENT_ID
       };
 
-      const res = await fetch(BACKEND_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
+      const res = await withTimeout(
+        fetch(BACKEND_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        }),
+        20000
+      );
 
-      const data = await res.json();
+      let data = null;
+      try {
+        data = await res.json();
+      } catch (e) {
+        hideTyping();
+        appendMessage(
+          "Serwer odpowiedział w nieoczekiwany sposób. Spróbuj ponownie za chwilę.",
+          "agent"
+        );
+        console.error("[Kontaktio] Błąd parsowania JSON:", e);
+        return;
+      }
+
       hideTyping();
+
+      if (!res.ok) {
+        if (res.status === 403 && data?.status === "unactive") {
+          clientActive = false;
+          clientStatusMessage =
+            data.statusMessage ||
+            "Asystent jest obecnie niedostępny. Skontaktuj się bezpośrednio z firmą.";
+
+          appendMessage(clientStatusMessage, "agent");
+          console.warn(
+            "[Kontaktio] Klient nieaktywny – wyłączam możliwość dalszej rozmowy."
+          );
+
+          if (input) {
+            input.disabled = true;
+            input.placeholder = "Asystent jest nieaktywny.";
+          }
+          const btn = document.getElementById("k-send");
+          if (btn) btn.disabled = true;
+
+          return;
+        }
+
+        appendMessage(
+          "Asystent chwilowo nie odpowiada. Spróbuj ponownie za moment.",
+          "agent"
+        );
+        return;
+      }
 
       sessionId = data.sessionId || sessionId || data.session_id || null;
       if (sessionId) saveSessionId(sessionId);
@@ -654,9 +913,21 @@
       appendMessage(reply, "agent");
       pushToHistory(reply, "agent");
       playSound("receive");
+      dispatchEvent("replyReceived", {
+        clientId: CLIENT_ID,
+        message: reply
+      });
+
+      if (!isOpen) {
+        const launcher = document.getElementById("k-launcher");
+        if (launcher) launcher.classList.add("k-has-unread");
+      }
     } catch (err) {
       hideTyping();
-      appendMessage("Wystąpił błąd po stronie serwera. Spróbuj ponownie za chwilę.", "agent");
+      appendMessage(
+        "Wystąpił błąd po stronie serwera lub przekroczono czas oczekiwania. Spróbuj ponownie za chwilę.",
+        "agent"
+      );
       console.error("[Kontaktio] Błąd podczas wysyłania:", err);
     } finally {
       isSending = false;
@@ -665,31 +936,222 @@
     }
   }
 
-  function saveSessionId(id) {
-    try {
-      localStorage.setItem(STORAGE_KEY_SESSION, id);
-    } catch {}
-  }
-
-  function loadSessionId() {
-    try {
-      return localStorage.getItem(STORAGE_KEY_SESSION);
-    } catch {
-      return null;
-    }
-  }
+  /* ---------------- WELCOME ---------------- */
 
   function showWelcomeMessage() {
-    const text =
+    const baseText =
       CLIENT_ID === "premium"
         ? "Dzień dobry. Jestem asystentem premium Kontaktio. Pokażę Ci, jak zbudować doświadczenie godne Twojej marki."
         : CLIENT_ID === "amico"
         ? "Cześć! Jestem branżowym asystentem Kontaktio. Zobacz, jak ten widget może pracować dla Twojej firmy."
         : "Hej! Jestem demo asystentem Kontaktio. Mogę wytłumaczyć, jak to rozwiązanie sprawdzi się na Twojej stronie.";
-    appendMessage(text, "agent");
-    pushToHistory(text, "agent");
+
+    // mini-onboarding w 2 krokach
+    appendMessage(baseText, "agent");
+    pushToHistory(baseText, "agent");
+
+    setTimeout(() => {
+      const hint =
+        CLIENT_ID === "amico"
+          ? "Możesz zacząć od pytania o materiały, z których wykonujemy realizacje."
+          : "Możesz kliknąć jedno z gotowych pytań poniżej, żeby zobaczyć, jak odpowiadam.";
+      appendMessage(hint, "agent");
+      pushToHistory(hint, "agent");
+    }, 600);
+  }
+
+  /* ---------------- DOM: WIDGET & LAUNCHER ---------------- */
+
+  async function createLauncher() {
+    if (launcherCreated) return;
+    launcherCreated = true;
+
+    await checkClientStatus();
+
+    if (!clientActive) {
+      console.warn(
+        "[Kontaktio] Klient nieaktywny – widget nie zostanie wyrenderowany.",
+        clientStatusMessage
+      );
+      return;
+    }
+
+    const launcher = document.createElement("div");
+    launcher.id = "k-launcher";
+    launcher.innerHTML = `<div id="k-launcher-icon">${THEME.launcherIcon}</div>`;
+
+    let launcherClickLocked = false;
+    launcher.addEventListener("click", () => {
+      if (launcherClickLocked) return;
+      launcherClickLocked = true;
+      setTimeout(() => (launcherClickLocked = false), 200);
+
+      toggleWidget();
+    });
+
+    document.body.appendChild(launcher);
+    dispatchEvent("launcherCreated", { clientId: CLIENT_ID });
+  }
+
+  function createWidget() {
+    if (document.getElementById("k-widget")) return;
+
+    const wrap = document.createElement("div");
+    wrap.id = "k-widget";
+    wrap.innerHTML = `
+      <div id="k-header">
+        <div id="k-header-inner">
+          <div id="k-avatar">
+            ${CLIENT_ID === "premium" ? "KP" : CLIENT_ID === "amico" ? "BA" : "AI"}
+          </div>
+          <div id="k-header-text">
+            <strong>${THEME.name}</strong>
+            <span>${THEME.subtitle}</span>
+          </div>
+        </div>
+        <div id="k-header-right">
+          <div id="k-pill">${
+            CLIENT_ID === "premium"
+              ? "Premium • AI"
+              : CLIENT_ID === "amico"
+              ? "Branżowy • AI"
+              : "Demo • AI"
+          }</div>
+          <button id="k-header-close" aria-label="Zamknij">&times;</button>
+        </div>
+      </div>
+      <div id="k-status"></div>
+      <div id="k-messages"></div>
+      <div id="k-quick"></div>
+      <div id="k-input-area">
+        <textarea id="k-input" placeholder="Napisz wiadomość..." rows="1"></textarea>
+        <button id="k-send">➤</button>
+      </div>
+    `;
+    document.body.appendChild(wrap);
+
+    const headerClose = document.getElementById("k-header-close");
+    const input = document.getElementById("k-input");
+    const sendBtn = document.getElementById("k-send");
+    const statusBar = document.getElementById("k-status");
+
+    if (headerClose) headerClose.onclick = toggleWidget;
+
+    if (statusBar) {
+      statusBar.className = "k-status-banner";
+      statusBar.innerHTML = `
+        <span>Rozmowy z asystentem nie są zapisywane poza tą stroną.</span>
+        <button class="k-clear-btn" type="button">Wyczyść rozmowę</button>
+      `;
+      const clearBtn = statusBar.querySelector(".k-clear-btn");
+      if (clearBtn) {
+        clearBtn.addEventListener("click", () => {
+          const messages = document.getElementById("k-messages");
+          if (messages) messages.innerHTML = "";
+          saveHistory([]);
+          showWelcomeMessage();
+        });
+      }
+    }
+
+    if (input) {
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          sendMessage();
+        }
+      });
+
+      input.addEventListener("input", () => {
+        input.style.height = "auto";
+        input.style.height = Math.min(input.scrollHeight, 80) + "px";
+      });
+
+      setTimeout(() => {
+        if (!input.disabled) input.focus();
+      }, 50);
+    }
+
+    if (sendBtn) {
+      sendBtn.addEventListener("click", sendMessage);
+    }
+
+    setupQuickActions();
+    restoreHistory();
+
+    if (!hasMessages()) {
+      showWelcomeMessage();
+    }
+
+    // Esc zamyka widget
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && isOpen) {
+        toggleWidget(false);
+      }
+    });
+
+    dispatchEvent("widgetCreated", { clientId: CLIENT_ID });
+  }
+
+  function toggleWidget(force) {
+    const launcher = document.getElementById("k-launcher");
+    const widget = document.getElementById("k-widget");
+
+    if (!widget && !clientActive) {
+      // klient nieaktywny – nic nie robimy
+      return;
+    }
+
+    if (!widget) {
+      createWidget();
+      isOpen = true;
+    } else {
+      if (typeof force === "boolean") {
+        isOpen = force;
+      } else {
+        isOpen = !isOpen;
+      }
+      widget.style.display = isOpen ? "flex" : "none";
+    }
+
+    if (isOpen) {
+      playSound("open");
+      if (launcher) launcher.classList.remove("k-has-unread");
+      saveOpenState(true);
+      dispatchEvent("opened", { clientId: CLIENT_ID });
+    } else {
+      saveOpenState(false);
+      dispatchEvent("closed", { clientId: CLIENT_ID });
+    }
   }
 
   /* ---------------- INIT ---------------- */
+
   createLauncher();
+
+  // auto-open po X sekundach lub na podstawie stanu
+  const initialOpen = loadOpenState();
+  if (initialOpen) {
+    setTimeout(() => {
+      const launcher = document.getElementById("k-launcher");
+      if (launcher) toggleWidget(true);
+    }, 200);
+  } else if (AUTO_OPEN) {
+    setTimeout(() => {
+      const launcher = document.getElementById("k-launcher");
+      if (launcher) toggleWidget(true);
+    }, AUTO_OPEN_DELAY);
+  }
+
+  // otwarcie z parametru w URL ?kontaktio=open
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("kontaktio") === "open") {
+      setTimeout(() => {
+        const launcher = document.getElementById("k-launcher");
+        if (launcher) toggleWidget(true);
+      }, 200);
+    }
+  } catch {}
+
 })();
