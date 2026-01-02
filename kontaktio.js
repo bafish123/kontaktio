@@ -2,7 +2,7 @@
   if (window.KontaktioLoaded) return;
   window.KontaktioLoaded = true;
 
-  /* ---------------- CONFIG & STATE ---------------- */
+ 
 
   const script =
     document.currentScript ||
@@ -14,7 +14,7 @@
     script?.getAttribute("data-backend") ||
     "https://chatbot-backend-x2cy.onrender.com/chat";
 
-  // opcjonalny config JSON (np. do dodatkowego statusu) – backend i tak broni się sam
+
   const CONFIG_URL = script?.getAttribute("data-config") || null;
 
   const AUTO_OPEN = script?.getAttribute("data-auto-open") === "true";
@@ -38,7 +38,7 @@
 
   document.body.classList.add("k-theme-" + CLIENT_ID);
 
-  /* ---------------- THEME ---------------- */
+
 
   const BASE_THEME = {
     accent: "#22d3ee",
@@ -91,7 +91,7 @@
         }
       : BASE_THEME;
 
-  /* ---------------- SOUNDS (hook pod przyszłość) ---------------- */
+ 
 
   const SOUNDS = {
     open: null,
@@ -108,7 +108,7 @@
     } catch {}
   }
 
-  /* ---------------- HELPERS ---------------- */
+
 
   function dispatchEvent(name, detail) {
     try {
@@ -137,15 +137,15 @@
       .replace(/>/g, "&gt;");
   }
 
-  // prosty parser: linki + nowe linie, minimalny markdown
+ 
   function renderMessageContent(text) {
     if (!text) return "";
     let safe = escapeHtml(text);
 
-    // pogrubienie **tekst**
+ 
     safe = safe.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
 
-    // proste listy: linie zaczynające się od "- "
+  
     if (safe.includes("- ")) {
       const lines = safe.split(/\n/);
       let inList = false;
@@ -172,11 +172,11 @@
       if (inList) out += "</ul>";
       safe = out;
     } else {
-      // zwykłe nowe linie
+    
       safe = safe.replace(/\n/g, "<br/>");
     }
 
-    // linki
+
     const urlRegex = /\b(https?:\/\/[^\s<]+[^\s<\.)])/gi;
     safe = safe.replace(
       urlRegex,
@@ -260,10 +260,10 @@
     ]);
   }
 
-  /* ---------------- CLIENT STATUS (opcjonalny frontend guard) ---------------- */
+
 
   async function checkClientStatus() {
-    if (!CONFIG_URL) return; // główne sprawdzenie jest po stronie backendu
+    if (!CONFIG_URL) return; 
 
     try {
       const res = await fetch(CONFIG_URL, { cache: "no-store" });
@@ -282,7 +282,7 @@
     }
   }
 
-  /* ---------------- STYLE ---------------- */
+
 
   const style = document.createElement("style");
   style.textContent = `
@@ -663,7 +663,7 @@
   `;
   document.head.appendChild(style);
 
-  /* ---------------- DOM: MESSAGES ---------------- */
+  
 
   function appendMessage(text, from = "agent", meta = {}) {
     const messages = document.getElementById("k-messages");
@@ -681,7 +681,7 @@
 
     row.appendChild(bubble);
 
-    // opcjonalne quick replies (meta.quickReplies)
+   
     if (meta.quickReplies && Array.isArray(meta.quickReplies)) {
       const qrWrap = document.createElement("div");
       qrWrap.className = "k-quick-replies";
@@ -738,7 +738,7 @@
     typingEl = null;
   }
 
-  /* ---------------- QUICK ACTIONS ---------------- */
+  
 
   function setupQuickActions() {
     const quick = document.getElementById("k-quick");
@@ -753,7 +753,7 @@
         const parsed = JSON.parse(dataQuick);
         if (Array.isArray(parsed)) sets = parsed;
       } catch {
-        // fallback do zdefiniowanych niżej
+        
       }
     }
 
@@ -791,7 +791,7 @@
     });
   }
 
-  /* ---------------- HISTORY ---------------- */
+
 
   function restoreHistory() {
     const history = loadHistory();
@@ -808,7 +808,7 @@
     saveHistory(history);
   }
 
-  /* ---------------- BACKEND ---------------- */
+
 
   async function sendMessage() {
     if (isSending) return;
@@ -935,7 +935,7 @@
     }
   }
 
-  /* ---------------- WELCOME ---------------- */
+  
 
   function showWelcomeMessage() {
     const baseText =
@@ -958,7 +958,7 @@
     }, 600);
   }
 
-  /* ---------------- DOM: WIDGET & LAUNCHER ---------------- */
+ 
 
   async function createLauncher() {
     if (launcherCreated) return;
@@ -1122,7 +1122,7 @@
     }
   }
 
-  /* ---------------- INIT ---------------- */
+  
 
   createLauncher();
 
@@ -1139,7 +1139,7 @@
     }, AUTO_OPEN_DELAY);
   }
 
-  // otwarcie z parametru w URL ?kontaktio=open
+  
   try {
     const params = new URLSearchParams(window.location.search);
     if (params.get("kontaktio") === "open") {
