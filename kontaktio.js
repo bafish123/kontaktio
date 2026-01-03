@@ -1,278 +1,594 @@
 (function () {
-  if (window.KontaktioLoaded) return;
-  window.KontaktioLoaded = true;
+  // Pozwalamy na wiele instancji na jednej stronie:
+  // - jeden <script data-kontaktio> = jeden widget
+  const scripts = Array.from(document.querySelectorAll("script[data-kontaktio]"));
+  if (!scripts.length) return;
 
-  const script =
-    document.currentScript ||
-    document.querySelector('script[data-client][data-kontaktio]');
+  // Zapobiega podwójnemu initowi przy dynamicznym przeładowaniu
+  if (window.__KontaktioBooted) return;
+  window.__KontaktioBooted = true;
 
-  const CLIENT_ID = script?.getAttribute("data-client") || "demo";
-  const SUPABASE_URL = script?.getAttribute("data-supabase-url") || "";
-  const SUPABASE_KEY = script?.getAttribute("data-supabase-key") || "";
-
-  const STORAGE_KEY_HISTORY = `kontaktio-history-${CLIENT_ID}`;
-  const STORAGE_KEY_SESSION = `kontaktio-session-${CLIENT_ID}`;
-  const STORAGE_KEY_OPEN = `kontaktio-open-${CLIENT_ID}`;
-
-  let CLIENT_CONFIG = null;
-  let THEME = {};
-  let sessionId = null;
-  let isOpen = false;
-  let isSending = false;
-
-  async function loadClientConfig() {
+  // ================
+  // Helpers
+  // ================
+  const safeJsonParse = (s, fallback) => {
     try {
-      const url = `${SUPABASE_URL}/rest/v1/clients?select=*&id=eq.${CLIENT_ID}`;
-      const res = await fetch(url, {
-        headers: {
-          apikey: SUPABASE_KEY,
-          Authorization: `Bearer ${SUPABASE_KEY}`
-        }
-      });
-
-      if (!res.ok) {
-        console.warn("[Kontaktio] Błąd pobierania configu:", res.status);
-        return null;
-      }
-
-      const data = await res.json();
-      if (!data || data.length === 0) {
-        console.warn("[Kontaktio] Brak klienta w Supabase:", CLIENT_ID);
-        return null;
-      }
-
-      const cfg = data[0];
-      CLIENT_CONFIG = cfg;
-      THEME = cfg.theme || {};
-
-      window.KONTAKTIO_CONFIG = cfg;
-      window.KONTAKTIO_THEME = THEME;
-
-      return cfg;
-    } catch (e) {
-      console.error("[Kontaktio] loadClientConfig error:", e);
-      return null;
-    }
-  }
-
-  function saveSessionId(id) {
-    try {
-      localStorage.setItem(STORAGE_KEY_SESSION, id);
-    } catch {}
-  }
-
-  function loadSessionId() {
-    try {
-      return localStorage.getItem(STORAGE_KEY_SESSION);
+      return JSON.parse(s);
     } catch {
-      return null;
+      return fallback;
     }
-  }
+  };
 
-  function saveOpenState(open) {
-    try {
-      localStorage.setItem(STORAGE_KEY_OPEN, open ? "1" : "0");
-    } catch {}
-  }
+  const el = (tag, attrs = {}, children = []) => {
+    const node = document.createElement(tag);
+    Object.entries(attrs).forEach(([k, v]) => {
+      if (k === "class") node.className = v;
+      else if (k === "style") node.setAttribute("style", v);
+      else if (k.startsWith("on") && typeof v === "function")
+        node.addEventListener(k.slice(2), v);
+      else if (v !== null && v !== undefined) node.setAttribute(k, String(v));
+    });
+    children.forEach((c) => node.appendChild(typeof c === "string" ? document.createTextNode(c) : c));
+    return node;
+  };
 
-  function loadOpenState() {
-    try {
-      return localStorage.getItem(STORAGE_KEY_OPEN) === "1";
-    } catch {
-      return false;
-    }
-  }
+  const ensureStyles = () => {
+    if (document.getElementById("kontaktio-styles")) return;
 
-  function saveHistory(messages) {
-    try {
-      localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(messages));
-    } catch {}
-  }
-
-  function loadHistory() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY_HISTORY);
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  }
-
-  function injectStyles(css) {
     const style = document.createElement("style");
-    style.innerHTML = css;
-    document.head.appendChild(style);
-  }
-
-  function generateCSS() {
-    const t = THEME || {};
-    const radius = t.radius || 18;
-    const inputBg = t.inputBg || "#ffffff";
-    const buttonBg = t.buttonBg || "#202667";
-
-    const css = `
-      #kontaktio-launcher {
+    style.id = "kontaktio-styles";
+    style.innerHTML = `
+      .kontaktio-launcher {
         position: fixed;
-        bottom: 20px;
-        right: 20px;
-        width: 56px;
-        height: 56px;
-        border-radius: 50%;
-        background: ${buttonBg};
-        color: #fff;
         display: flex;
         align-items: center;
         justify-content: center;
         cursor: pointer;
-        z-index: 999999;
+        user-select: none;
+        z-index: 2147483000;
+        box-shadow: 0 10px 30px rgba(0,0,0,.25);
+        transform: translateZ(0);
       }
 
-      #kontaktio-widget {
+      .kontaktio-widget {
         position: fixed;
-        bottom: 90px;
-        right: 20px;
-        width: 360px;
-        max-height: 600px;
-        background: ${inputBg};
-        border-radius: ${radius}px;
-        box-shadow: 0 8px 28px rgba(0,0,0,0.25);
         display: none;
         flex-direction: column;
         overflow: hidden;
-        z-index: 999999;
-        font-family: system-ui, sans-serif;
+        z-index: 2147483000;
+        width: 360px;
+        max-width: calc(100vw - 24px);
+        max-height: min(640px, calc(100vh - 120px));
+        box-shadow: 0 12px 40px rgba(0,0,0,.28);
+        transform: translateZ(0);
       }
 
-      #kontaktio-header {
-        background: ${buttonBg};
-        color: #fff;
-        padding: 12px 16px;
-        font-weight: bold;
+      .kontaktio-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 14px;
+        font-weight: 700;
+        font-size: 14px;
+        letter-spacing: .2px;
       }
 
-      #kontaktio-messages {
+      .kontaktio-header-sub {
+        margin-top: 2px;
+        font-weight: 500;
+        font-size: 12px;
+        opacity: .85;
+      }
+
+      .kontaktio-close {
+        border: none;
+        background: transparent;
+        font-size: 18px;
+        cursor: pointer;
+        padding: 6px 8px;
+        line-height: 1;
+        opacity: .9;
+      }
+      .kontaktio-close:hover { opacity: 1; }
+
+      .kontaktio-messages {
         flex: 1;
         overflow-y: auto;
-        padding: 16px;
+        padding: 14px;
       }
 
-      .kontaktio-msg {
-        max-width: 80%;
-        padding: 10px 14px;
-        border-radius: ${radius}px;
-        margin-bottom: 10px;
-        line-height: 1.4;
+      .kontaktio-row {
+        display: flex;
+        margin: 10px 0;
+      }
+      .kontaktio-row.user { justify-content: flex-end; }
+      .kontaktio-row.bot { justify-content: flex-start; }
+
+      .kontaktio-bubble {
+        max-width: 82%;
+        padding: 10px 12px;
         white-space: pre-wrap;
+        line-height: 1.35;
+        font-size: 14px;
+        box-shadow: 0 4px 18px rgba(0,0,0,.08);
       }
 
-      .kontaktio-msg-user {
-        background: #202667;
-        color: #fff;
-        margin-left: auto;
+      .kontaktio-quick {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 0 14px 12px 14px;
       }
 
-      .kontaktio-msg-bot {
-        background: #f3f4f6;
-        color: #111827;
-        margin-right: auto;
+      .kontaktio-quick button {
+        cursor: pointer;
+        border: 1px solid rgba(0,0,0,.12);
+        background: #fff;
+        padding: 8px 10px;
+        font-size: 12px;
+        border-radius: 999px;
+        line-height: 1.1;
       }
 
-      #kontaktio-input-wrap {
-        padding: 12px;
-        border-top: 1px solid #ccc;
-        background: ${inputBg};
+      .kontaktio-inputwrap {
+        display: flex;
+        gap: 8px;
+        padding: 12px 14px 14px 14px;
+        border-top: 1px solid rgba(0,0,0,.08);
       }
 
-      #kontaktio-input {
-        width: 100%;
-        padding: 10px;
-        border-radius: ${radius}px;
-        border: 1px solid #ccc;
+      .kontaktio-input {
+        flex: 1;
+        border: 1px solid rgba(0,0,0,.16);
+        border-radius: 999px;
+        padding: 10px 12px;
+        font-size: 14px;
         outline: none;
       }
+
+      .kontaktio-send {
+        border: none;
+        border-radius: 999px;
+        padding: 10px 12px;
+        cursor: pointer;
+        font-weight: 700;
+      }
+
+      .kontaktio-muted {
+        opacity: .75;
+        font-size: 12px;
+        padding: 10px 14px 0 14px;
+      }
+
+      @media (max-width: 480px) {
+        .kontaktio-widget { width: calc(100vw - 24px); }
+      }
     `;
+    document.head.appendChild(style);
+  };
 
-    injectStyles(css);
-  }
+  const normalizeClient = (cfg) => {
+    const company = cfg.company || {};
+    const theme = cfg.theme || {};
 
-  function createLauncher() {
-    const launcher = document.createElement("div");
-    launcher.id = "kontaktio-launcher";
-    launcher.innerHTML = CLIENT_CONFIG.launcher_icon || "💬";
-    launcher.addEventListener("click", toggleWidget);
-    document.body.appendChild(launcher);
-  }
+    return {
+      id: cfg.id,
+      status: cfg.status || "active",
+      statusMessage: cfg.statusMessage || cfg.status_message || "",
+      company: {
+        name: company.name || "Asystent",
+        email: company.email || "",
+        phone: company.phone || "",
+        address: company.address || "",
+        hours: company.hours || ""
+      },
+      theme: {
+        headerBg: theme.headerBg || theme.buttonBg || "#111827",
+        headerText: theme.headerText || "#ffffff",
+        widgetBg: theme.widgetBg || "#ffffff",
+        inputBg: theme.inputBg || "#ffffff",
+        inputText: theme.inputText || "#111827",
+        buttonBg: theme.buttonBg || "#2563eb",
+        buttonText: theme.buttonText || "#ffffff",
+        botBubbleBg: theme.botBubbleBg || "#f3f4f6",
+        botBubbleText: theme.botBubbleText || "#111827",
+        userBubbleBg: theme.userBubbleBg || theme.buttonBg || "#2563eb",
+        userBubbleText: theme.userBubbleText || "#ffffff",
+        radius: Number(theme.radius ?? 18),
+        position: theme.position === "left" ? "left" : "right"
+      },
+      launcher_icon: cfg.launcher_icon || "💬",
+      welcome_message: cfg.welcome_message || "",
+      welcome_hint: cfg.welcome_hint || "",
+      quick_replies: Array.isArray(cfg.quick_replies) ? cfg.quick_replies : [],
+      auto_open_enabled: !!cfg.auto_open_enabled,
+      auto_open_delay: Number(cfg.auto_open_delay ?? 15000)
+    };
+  };
 
-  function createWidget() {
-    const widget = document.createElement("div");
-    widget.id = "kontaktio-widget";
+  const buildKeys = (clientId) => ({
+    history: `kontaktio-history-${clientId}`,
+    session: `kontaktio-session-${clientId}`,
+    open: `kontaktio-open-${clientId}`,
+    autoOpened: `kontaktio-autoopened-${clientId}`
+  });
 
-    widget.innerHTML = `
-      <div id="kontaktio-header">
-        ${CLIENT_CONFIG.company?.name || "Asystent"}
-      </div>
-      <div id="kontaktio-messages"></div>
-      <div id="kontaktio-input-wrap">
-        <input id="kontaktio-input" placeholder="Napisz wiadomość..." />
-      </div>
-    `;
+  // ================
+  // Instance init
+  // ================
+  ensureStyles();
 
-    document.body.appendChild(widget);
+  scripts.forEach((script, idx) => {
+    const CLIENT_ID = script.getAttribute("data-client") || "demo";
+    const BACKEND = script.getAttribute("data-backend") || "";
+    const baseUrl = BACKEND.replace(/\/+$/, "");
 
-    const input = document.getElementById("kontaktio-input");
-    if (input) {
+    if (!baseUrl) {
+      console.error("[Kontaktio] Missing data-backend on script tag");
+      return;
+    }
+
+    const keys = buildKeys(CLIENT_ID);
+
+    let cfg = null;
+    let isOpen = false;
+    let isSending = false;
+
+    const loadSessionId = () => {
+      try {
+        return localStorage.getItem(keys.session);
+      } catch {
+        return null;
+      }
+    };
+
+    const saveSessionId = (sid) => {
+      try {
+        localStorage.setItem(keys.session, sid);
+      } catch {}
+    };
+
+    const loadOpenState = () => {
+      try {
+        return localStorage.getItem(keys.open) === "1";
+      } catch {
+        return false;
+      }
+    };
+
+    const saveOpenState = (open) => {
+      try {
+        localStorage.setItem(keys.open, open ? "1" : "0");
+      } catch {}
+    };
+
+    const loadHistory = () => {
+      try {
+        return safeJsonParse(localStorage.getItem(keys.history) || "[]", []);
+      } catch {
+        return [];
+      }
+    };
+
+    const saveHistory = (arr) => {
+      try {
+        localStorage.setItem(keys.history, JSON.stringify(arr || []));
+      } catch {}
+    };
+
+    const markAutoOpened = () => {
+      try {
+        localStorage.setItem(keys.autoOpened, "1");
+      } catch {}
+    };
+
+    const wasAutoOpened = () => {
+      try {
+        return localStorage.getItem(keys.autoOpened) === "1";
+      } catch {
+        return false;
+      }
+    };
+
+    const fetchConfig = async () => {
+      const res = await fetch(`${baseUrl}/config/${encodeURIComponent(CLIENT_ID)}`, {
+        method: "GET",
+        headers: { "Content-Type": "application/json" }
+      });
+
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`Config error ${res.status}: ${txt}`);
+      }
+
+      const data = await res.json();
+      return normalizeClient(data);
+    };
+
+    const rootId = `kontaktio-root-${CLIENT_ID}-${idx}`;
+    const launcherId = `kontaktio-launcher-${CLIENT_ID}-${idx}`;
+    const widgetId = `kontaktio-widget-${CLIENT_ID}-${idx}`;
+    const messagesId = `kontaktio-messages-${CLIENT_ID}-${idx}`;
+    const inputId = `kontaktio-input-${CLIENT_ID}-${idx}`;
+    const quickId = `kontaktio-quick-${CLIENT_ID}-${idx}`;
+    const mutedId = `kontaktio-muted-${CLIENT_ID}-${idx}`;
+
+    const getPos = () => {
+      const offsetX = 20;
+      const offsetY = 20;
+      const pos = cfg?.theme?.position === "left" ? "left" : "right";
+      return { pos, offsetX, offsetY };
+    };
+
+    const scrollToBottom = () => {
+      const wrap = document.getElementById(messagesId);
+      if (!wrap) return;
+      wrap.scrollTop = wrap.scrollHeight;
+    };
+
+    const pushMessage = (role, text) => {
+      const wrap = document.getElementById(messagesId);
+      if (!wrap) return;
+
+      const row = el("div", { class: `kontaktio-row ${role}` }, [
+        el(
+          "div",
+          { class: "kontaktio-bubble" },
+          [String(text || "")]
+        )
+      ]);
+
+      const bubble = row.querySelector(".kontaktio-bubble");
+      const r = Math.max(10, Number(cfg.theme.radius || 18));
+      bubble.style.borderRadius = `${r}px`;
+      bubble.style.background = role === "user" ? cfg.theme.userBubbleBg : cfg.theme.botBubbleBg;
+      bubble.style.color = role === "user" ? cfg.theme.userBubbleText : cfg.theme.botBubbleText;
+
+      wrap.appendChild(row);
+      scrollToBottom();
+
+      const history = loadHistory();
+      history.push({ role, text: String(text || ""), ts: Date.now() });
+      saveHistory(history);
+    };
+
+    const setMuted = (text) => {
+      const m = document.getElementById(mutedId);
+      if (!m) return;
+      m.textContent = text || "";
+      m.style.display = text ? "block" : "none";
+    };
+
+    const renderQuickReplies = () => {
+      const wrap = document.getElementById(quickId);
+      if (!wrap) return;
+
+      wrap.innerHTML = "";
+      const items = (cfg.quick_replies || []).filter(Boolean).slice(0, 8);
+
+      items.forEach((q) => {
+        const btn = el("button", {}, [String(q)]);
+        btn.addEventListener("click", () => {
+          const input = document.getElementById(inputId);
+          if (input) input.value = String(q);
+          sendMessage(String(q));
+        });
+        wrap.appendChild(btn);
+      });
+
+      wrap.style.display = items.length ? "flex" : "none";
+    };
+
+    const openWidget = () => {
+      isOpen = true;
+      saveOpenState(true);
+
+      const widget = document.getElementById(widgetId);
+      if (widget) widget.style.display = "flex";
+
+      scrollToBottom();
+      const input = document.getElementById(inputId);
+      if (input) input.focus();
+    };
+
+    const closeWidget = () => {
+      isOpen = false;
+      saveOpenState(false);
+
+      const widget = document.getElementById(widgetId);
+      if (widget) widget.style.display = "none";
+    };
+
+    const toggleWidget = () => {
+      if (isOpen) closeWidget();
+      else openWidget();
+    };
+
+    const sendMessage = async (text) => {
+      const msg = String(text || "").trim();
+      if (!msg) return;
+      if (isSending) return;
+
+      isSending = true;
+      setMuted("");
+
+      const input = document.getElementById(inputId);
+      if (input) input.value = "";
+
+      pushMessage("user", msg);
+
+      const payload = {
+        clientId: CLIENT_ID,
+        message: msg,
+        sessionId: loadSessionId()
+      };
+
+      try {
+        const res = await fetch(`${baseUrl}/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          const errMsg =
+            data?.statusMessage ||
+            data?.error ||
+            "Wystąpił błąd. Spróbuj ponownie za chwilę.";
+          pushMessage("bot", errMsg);
+          return;
+        }
+
+        if (data.sessionId) saveSessionId(data.sessionId);
+
+        const reply = data.reply || "—";
+        pushMessage("bot", reply);
+      } catch (e) {
+        pushMessage("bot", "Brak połączenia. Spróbuj ponownie za chwilę.");
+      } finally {
+        isSending = false;
+      }
+    };
+
+    const mount = async () => {
+      // Root
+      const root = el("div", { id: rootId });
+      document.body.appendChild(root);
+
+      // Load config
+      try {
+        cfg = await fetchConfig();
+      } catch (e) {
+        console.error("[Kontaktio] Config load failed:", e);
+        cfg = normalizeClient({
+          id: CLIENT_ID,
+          status: "unactive",
+          statusMessage: "Asystent jest obecnie niedostępny.",
+          company: { name: "Asystent" },
+          theme: {}
+        });
+      }
+
+      // Positioning
+      const { pos, offsetX, offsetY } = getPos();
+
+      // Launcher
+      const launcher = el("div", { id: launcherId, class: "kontaktio-launcher" }, [
+        el("div", {}, [cfg.launcher_icon || "💬"])
+      ]);
+
+      launcher.style.width = "56px";
+      launcher.style.height = "56px";
+      launcher.style.borderRadius = "999px";
+      launcher.style.background = cfg.theme.buttonBg;
+      launcher.style.color = cfg.theme.buttonText;
+      launcher.style.bottom = `${offsetY}px`;
+      launcher.style[pos] = `${offsetX}px`;
+
+      launcher.addEventListener("click", toggleWidget);
+
+      // Widget
+      const widget = el("div", { id: widgetId, class: "kontaktio-widget" }, []);
+
+      widget.style.background = cfg.theme.widgetBg;
+      widget.style.borderRadius = `${Math.max(12, Number(cfg.theme.radius || 18))}px`;
+      widget.style.bottom = `${offsetY + 70}px`;
+      widget.style[pos] = `${offsetX}px`;
+
+      const closeBtn = el("button", { class: "kontaktio-close", type: "button" }, ["×"]);
+      closeBtn.style.color = cfg.theme.headerText;
+      closeBtn.addEventListener("click", closeWidget);
+
+      const headerLeft = el("div", {}, [
+        el("div", {}, [cfg.company.name || "Asystent"]),
+        cfg.welcome_hint ? el("div", { class: "kontaktio-header-sub" }, [cfg.welcome_hint]) : el("div")
+      ]);
+
+      const header = el("div", { class: "kontaktio-header" }, [headerLeft, closeBtn]);
+      header.style.background = cfg.theme.headerBg;
+      header.style.color = cfg.theme.headerText;
+
+      const muted = el("div", { id: mutedId, class: "kontaktio-muted" }, [""]);
+      muted.style.display = "none";
+
+      const messages = el("div", { id: messagesId, class: "kontaktio-messages" }, []);
+      const quick = el("div", { id: quickId, class: "kontaktio-quick" }, []);
+      const input = el("input", {
+        id: inputId,
+        class: "kontaktio-input",
+        placeholder: "Napisz wiadomość…",
+        type: "text"
+      });
+
+      input.style.background = cfg.theme.inputBg;
+      input.style.color = cfg.theme.inputText;
+
       input.addEventListener("keydown", (e) => {
         if (e.key === "Enter") {
           e.preventDefault();
-          sendUserMessage(input.value);
+          sendMessage(input.value);
         }
       });
-    }
-  }
 
-  function toggleWidget() {
-    isOpen = !isOpen;
-    saveOpenState(isOpen);
+      const sendBtn = el("button", { class: "kontaktio-send", type: "button" }, ["Wyślij"]);
+      sendBtn.style.background = cfg.theme.buttonBg;
+      sendBtn.style.color = cfg.theme.buttonText;
+      sendBtn.addEventListener("click", () => sendMessage(input.value));
 
-    const widget = document.getElementById("kontaktio-widget");
-    if (!widget) return;
+      const inputWrap = el("div", { class: "kontaktio-inputwrap" }, [input, sendBtn]);
+      inputWrap.style.background = cfg.theme.widgetBg;
 
-    widget.style.display = isOpen ? "flex" : "none";
+      widget.appendChild(header);
+      widget.appendChild(muted);
+      widget.appendChild(messages);
+      widget.appendChild(quick);
+      widget.appendChild(inputWrap);
 
-    if (isOpen) {
-      scrollMessagesToBottom();
-      focusInput();
-    }
-  }
+      root.appendChild(widget);
+      root.appendChild(launcher);
 
-  function focusInput() {
-    const input = document.getElementById("kontaktio-input");
-    if (input) input.focus();
-  }
+      // Restore history
+      const history = loadHistory();
+      history.forEach((m) => {
+        if (!m || !m.role) return;
+        pushMessage(m.role === "user" ? "user" : "bot", m.text || "");
+      });
 
-  function addMessage(role, text) {
-    const wrap = document.getElementById("kontaktio-messages");
-    if (!wrap) return;
+      // Welcome / status
+      if (cfg.status !== "active") {
+        const msg =
+          cfg.statusMessage ||
+          "Asystent jest obecnie niedostępny. Skontaktuj się z firmą bezpośrednio.";
+        if (!history.length) pushMessage("bot", msg);
+        setMuted("Asystent jest wyłączony.");
+      } else if (!history.length) {
+        if (cfg.welcome_message) pushMessage("bot", cfg.welcome_message);
+      }
 
-    const div = document.createElement("div");
-    div.className = `kontaktio-msg kontaktio-msg-${role}`;
-    div.textContent = text;
+      // Quick replies
+      renderQuickReplies();
 
-    wrap.appendChild(div);
-    scrollMessagesToBottom();
+      // Open state restore
+      isOpen = loadOpenState();
+      if (isOpen) openWidget();
 
-    const history = loadHistory();
-    history.push({ role, text });
-    saveHistory(history);
-  }
+      // Auto open (tylko raz na klienta per przeglądarka)
+      if (
+        cfg.status === "active" &&
+        cfg.auto_open_enabled &&
+        !wasAutoOpened() &&
+        !loadOpenState()
+      ) {
+        setTimeout(() => {
+          markAutoOpened();
+          openWidget();
+        }, Math.max(0, cfg.auto_open_delay || 0));
+      }
+    };
 
-  function scrollMessagesToBottom() {
-    const wrap = document.getElementById("kontaktio-messages");
-    if (wrap) wrap.scrollTop = wrap.scrollHeight;
-  }
+    mount();
+  });
+})();
 
-  async function sendUserMessage(text) {
-    if (!text || !text.trim()) return;
-    if (isSending) return;
-
-    const input = document
