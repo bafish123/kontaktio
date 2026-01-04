@@ -305,7 +305,7 @@
       return normalizeClient(data);
     };
 
-                  const rootId = `kontaktio-root-${CLIENT_ID}-${idx}`;
+    const rootId = `kontaktio-root-${CLIENT_ID}-${idx}`;
     const launcherId = `kontaktio-launcher-${CLIENT_ID}-${idx}`;
     const widgetId = `kontaktio-widget-${CLIENT_ID}-${idx}`;
     const messagesId = `kontaktio-messages-${CLIENT_ID}-${idx}`;
